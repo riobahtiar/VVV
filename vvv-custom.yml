@@ -16,17 +16,35 @@
 sites:
 
   # latest version of WordPress, can be used for client work and testing
-  wordpress-one:
-    description: "A standard WP install, useful for building plugins, testing things, etc"
+  os:
+    description: "Open Sources Portfolio"
     repo: https://github.com/Varying-Vagrant-Vagrants/custom-site-template.git
     hosts:
-      - one.wordpress.test
+      - os.test
 
-  wordpress-two:
-    description: "A standard WP install, useful for building plugins, testing things, etc"
+  koranpantura:
+    description: "Koran Pantura"
     repo: https://github.com/Varying-Vagrant-Vagrants/custom-site-template.git
     hosts:
-      - two.wordpress.test
+      - koranpantura.test
+
+  rio:
+    description: "Rio Blog"
+    repo: https://github.com/Varying-Vagrant-Vagrants/custom-site-template.git
+    hosts:
+      - rio.test
+
+  promo:
+    description: "Promo"
+    repo: https://github.com/Varying-Vagrant-Vagrants/custom-site-template.git
+    hosts:
+      - promo.test
+
+  seller:
+    description: "Promo"
+    repo: https://github.com/Varying-Vagrant-Vagrants/custom-site-template.git
+    hosts:
+      - seller.test
 
   #mysite:
   #  description: "My website"

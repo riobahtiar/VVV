@@ -41,7 +41,7 @@ sites:
       - promo.test
 
   seller:
-    description: "Promo"
+    description: "Seller"
     repo: https://github.com/Varying-Vagrant-Vagrants/custom-site-template.git
     hosts:
       - seller.test

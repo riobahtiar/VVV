@@ -4,15 +4,78 @@ Vagrant.require_version ">= 2.1.4"
 require 'yaml'
 require 'fileutils'
 
+def virtualbox_path()
+    @vboxmanage_path = nil
+    if Vagrant::Util::Platform.windows? || Vagrant::Util::Platform.cygwin?
+        @vboxmanage_path = Vagrant::Util::Which.which("VBoxManage")
+
+        # On Windows, we use the VBOX_INSTALL_PATH environmental
+        # variable to find VBoxManage.
+        if !@vboxmanage_path && (ENV.key?("VBOX_INSTALL_PATH") ||
+          ENV.key?("VBOX_MSI_INSTALL_PATH"))
+
+          # Get the path.
+          path = ENV["VBOX_INSTALL_PATH"] || ENV["VBOX_MSI_INSTALL_PATH"]
+
+          # There can actually be multiple paths in here, so we need to
+          # split by the separator ";" and see which is a good one.
+          path.split(";").each do |single|
+            # Make sure it ends with a \
+            single += "\\" if !single.end_with?("\\")
+
+            # If the executable exists, then set it as the main path
+            # and break out
+            vboxmanage = "#{single}VBoxManage.exe"
+            if File.file?(vboxmanage)
+              @vboxmanage_path = Vagrant::Util::Platform.cygwin_windows_path(vboxmanage)
+              break
+            end
+          end
+        end
+
+        # If we still don't have one, try to find it using common locations
+        drive = ENV["SYSTEMDRIVE"] || "C:"
+        [
+          "#{drive}/Program Files/Oracle/VirtualBox",
+          "#{drive}/Program Files (x86)/Oracle/VirtualBox",
+          "#{ENV["PROGRAMFILES"]}/Oracle/VirtualBox"
+        ].each do |maybe|
+          path = File.join(maybe, "VBoxManage.exe")
+          if File.file?(path)
+            @vboxmanage_path = path
+            break
+          end
+        end
+        elsif Vagrant::Util::Platform.wsl?
+        if !Vagrant::Util::Platform.wsl_windows_access?
+          raise Vagrant::Errors::WSLVirtualBoxWindowsAccessError
+        end
+        @vboxmanage_path = Vagrant::Util::Which.which("VBoxManage") || Vagrant::Util::Which.which("VBoxManage.exe")
+        if !@vboxmanage_path
+          # If we still don't have one, try to find it using common locations
+          drive = "/mnt/c"
+          [
+            "#{drive}/Program Files/Oracle/VirtualBox",
+            "#{drive}/Program Files (x86)/Oracle/VirtualBox"
+          ].each do |maybe|
+            path = File.join(maybe, "VBoxManage.exe")
+            if File.file?(path)
+              @vboxmanage_path = path
+              break
+            end
+          end
+        end
+    end
+
+    # Fall back to hoping for the PATH to work out
+    @vboxmanage_path ||= "VBoxManage"
+    return @vboxmanage_path
+end
 
 def virtualbox_version()
-    vboxmanage = Vagrant::Util::Which.which("VBoxManage") || Vagrant::Util::Which.which("VBoxManage.exe")
-    if vboxmanage != nil
-        s = Vagrant::Util::Subprocess.execute(vboxmanage, '--version')
-        return s.stdout.strip!
-    else
-        return 'unknown'
-    end
+    vboxmanage = virtualbox_path()
+    s = Vagrant::Util::Subprocess.execute(vboxmanage, '--version')
+    return s.stdout.strip!
 end
 
 vagrant_dir = File.expand_path(File.dirname(__FILE__))
@@ -27,64 +90,22 @@ yellow="\033[38;5;3m"#136m"
 yellow_underlined="\033[4;38;5;3m"#136m"
 url=yellow_underlined
 creset="\033[0m"
+
 versionfile = File.open("#{vagrant_dir}/version", "r")
 version = versionfile.read
+version = version.gsub('\n','')
 
 # whitelist when we show the logo, else it'll show on global Vagrant commands
-if [ 'up', 'halt', 'resume', 'suspend', 'status', 'provision', 'reload' ].include? ARGV[0] then
+if [ 'up', 'resume', 'status', 'provision', 'reload' ].include? ARGV[0] then
   show_logo = true
 end
 if ENV['VVV_SKIP_LOGO'] then
   show_logo = false
 end
+
+# Show the initial splash screen
+
 if show_logo then
-
-  platform = 'platform-' + Vagrant::Util::Platform.platform + ' '
-  if Vagrant::Util::Platform.windows? then
-    platform = platform + 'windows '
-    if Vagrant::Util::Platform.wsl? then
-      platform = platform + 'wsl '
-    end
-    if Vagrant::Util::Platform.msys? then
-      platform = platform + 'msys '
-    end
-    if Vagrant::Util::Platform.cygwin? then
-      platform = platform + 'cygwin '
-    end
-    if Vagrant::Util::Platform.windows_hyperv_enabled? then
-      platform = platform + 'HyperV-Enabled '
-    end
-    if Vagrant::Util::Platform.windows_hyperv_admin? then
-      platform = platform + 'HyperV-Admin '
-    end
-    if Vagrant::Util::Platform.windows_admin? then
-      platform = platform + 'HasWinAdminPriv '
-    end
-  else
-
-    if ENV['SHELL'] then
-      platform = platform + "shell:" + ENV['SHELL'] + ' '
-    end
-    if Vagrant::Util::Platform.systemd? then
-      platform = platform + 'systemd '
-    end
-  end
-
-  if Vagrant.has_plugin?('vagrant-hostsupdater') then
-    platform = platform + 'vagrant-hostsupdater '
-  end
-
-  if Vagrant.has_plugin?('vagrant-vbguest') then
-    platform = platform + 'vagrant-vbguest '
-  end
-
-  if Vagrant::Util::Platform.fs_case_sensitive? then
-    platform = platform + 'CaseSensitiveFS '
-  end
-  if ! Vagrant::Util::Platform.terminal_supports_colors? then
-    platform = platform + 'NoColour '
-  end
-
   git_or_zip = "zip-no-vcs"
   branch = ''
   if File.directory?("#{vagrant_dir}/.git") then
@@ -93,22 +114,16 @@ if show_logo then
     branch = branch.chomp("\n"); # remove trailing newline so it doesnt break the ascii art
   end
 
-  splash = <<-HEREDOC
+    splashfirst = <<-HEREDOC
 \033[1;38;5;196m#{red}__ #{green}__ #{blue}__ __
 #{red}\\ V#{green}\\ V#{blue}\\ V / #{red}Varying #{green}Vagrant #{blue}Vagrants
 #{red} \\_/#{green}\\_/#{blue}\\_/  #{purple}v#{version}#{creset}-#{branch_c}#{git_or_zip}#{branch}
 
-#{yellow}Platform:   #{yellow}#{platform}
-#{green}Vagrant:    #{green}#{Vagrant::VERSION}
-#{blue}VirtualBox: #{blue}#{virtualbox_version()}
-
-#{docs}Docs:       #{url}https://varyingvagrantvagrants.org/
-#{docs}Contribute: #{url}https://github.com/varying-vagrant-vagrants/vvv
-#{docs}Dashboard:  #{url}http://vvv.test#{creset}
-
   HEREDOC
-  puts splash
+  puts splashfirst
 end
+
+# Load the config file before the second section of the splash screen
 
 if File.file?(File.join(vagrant_dir, 'vvv-custom.yml')) == false then
   puts "#{yellow}Copying #{red}vvv-config.yml#{yellow} to #{green}vvv-custom.yml#{yellow}\nIMPORTANT NOTE: Make all modifications to #{green}vvv-custom.yml#{yellow} in future so that they are not lost when VVV updates.#{creset}\n\n"
@@ -127,10 +142,7 @@ if ! vvv_config['hosts'].kind_of? Hash then
   vvv_config['hosts'] = Array.new
 end
 
-vvv_config['hosts'] += ['vvv.dev'] # Deprecated
 vvv_config['hosts'] += ['vvv.test']
-vvv_config['hosts'] += ['vvv.local']
-vvv_config['hosts'] += ['vvv.localhost']
 
 vvv_config['sites'].each do |site, args|
   if args.kind_of? String then
@@ -211,13 +223,84 @@ defaults['cores'] = 1
 defaults['private_network_ip'] = '192.168.50.4'
 
 vvv_config['vm_config'] = defaults.merge(vvv_config['vm_config'])
+vvv_config['hosts'] = vvv_config['hosts'].uniq
+
+# Show the second splash screen section
+
+if show_logo then
+  platform = 'platform-' + Vagrant::Util::Platform.platform + ' '
+  if Vagrant::Util::Platform.windows? then
+    platform = platform + 'windows '
+    if Vagrant::Util::Platform.wsl? then
+      platform = platform + 'wsl '
+    end
+    if Vagrant::Util::Platform.msys? then
+      platform = platform + 'msys '
+    end
+    if Vagrant::Util::Platform.cygwin? then
+      platform = platform + 'cygwin '
+    end
+    if Vagrant::Util::Platform.windows_hyperv_enabled? then
+      platform = platform + 'HyperV-Enabled '
+    end
+    if Vagrant::Util::Platform.windows_hyperv_admin? then
+      platform = platform + 'HyperV-Admin '
+    end
+    if Vagrant::Util::Platform.windows_admin? then
+      platform = platform + 'HasWinAdminPriv '
+    end
+  else
+
+    if ENV['SHELL'] then
+      platform = platform + "shell:" + ENV['SHELL'] + ' '
+    end
+    if Vagrant::Util::Platform.systemd? then
+      platform = platform + 'systemd '
+    end
+  end
+
+  if Vagrant.has_plugin?('vagrant-hostsupdater') then
+    platform = platform + 'vagrant-hostsupdater '
+  end
+
+  if Vagrant.has_plugin?('vagrant-vbguest') then
+    platform = platform + 'vagrant-vbguest '
+  end
+
+  if Vagrant::Util::Platform.fs_case_sensitive? then
+    platform = platform + 'CaseSensitiveFS '
+  end
+  if ! Vagrant::Util::Platform.terminal_supports_colors? then
+    platform = platform + 'NoColour '
+  end
+
+  if defined? vvv_config['vm_config']['wordcamp_contributor_day_box'] then
+    if vvv_config['vm_config']['wordcamp_contributor_day_box'] == true then
+      platform = platform + 'contributor_day_box '
+    end
+  end
+
+  splashsecond = <<-HEREDOC
+#{yellow}Platform:   #{yellow}#{platform}
+#{green}Vagrant:    #{green}v#{Vagrant::VERSION},	#{blue}VirtualBox: #{blue}v#{virtualbox_version()}
+#{purple}VVV Path:   "#{vagrant_dir}"
+
+#{docs}Docs:       #{url}https://varyingvagrantvagrants.org/
+#{docs}Contribute: #{url}https://github.com/varying-vagrant-vagrants/vvv
+#{docs}Dashboard:  #{url}http://vvv.test#{creset}
+
+  HEREDOC
+  puts splashsecond
+end
 
 if defined? vvv_config['vm_config']['provider'] then
   # Override or set the vagrant provider.
   ENV['VAGRANT_DEFAULT_PROVIDER'] = vvv_config['vm_config']['provider']
 end
 
-vvv_config['hosts'] = vvv_config['hosts'].uniq
+
+
+ENV["LC_ALL"] = "en_US.UTF-8"
 
 Vagrant.configure("2") do |config|
 
@@ -227,6 +310,9 @@ Vagrant.configure("2") do |config|
 
   # Configurations from 1.0.x can be placed in Vagrant 1.1.x specs like the following.
   config.vm.provider :virtualbox do |v|
+    # Move the ubuntu-bionic-18.04-cloudimg-console.log file to log directory.
+    v.customize ["modifyvm", :id, "--uartmode1", "file", File.join(vagrant_dir, "log/ubuntu-bionic-18.04-cloudimg-console.log")]
+
     v.customize ["modifyvm", :id, "--memory", vvv_config['vm_config']['memory']]
     v.customize ["modifyvm", :id, "--cpus", vvv_config['vm_config']['cores']]
     v.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
@@ -267,6 +353,18 @@ Vagrant.configure("2") do |config|
     v.enable_virtualization_extensions = true
     v.linked_clone = true
   end
+  
+  # Auto Download Vagrant plugins, supported from Vagrant 2.2.0
+  if !Vagrant.has_plugin?("vagrant-hostsupdater") then
+      if File.file?(File.join(vagrant_dir, 'vagrant-hostsupdater.gem')) then
+        system("vagrant plugin install " + File.join(vagrant_dir, 'vagrant-hostsupdater.gem'))
+        File.delete(File.join(vagrant_dir, 'vagrant-hostsupdater.gem'))
+        puts "#{yellow}VVV has completed installing local plugins. Please run the requested command again.#{creset}"
+        exit
+      else
+        config.vagrant.plugins = ["vagrant-hostsupdater"]
+      end
+  end
 
   # SSH Agent Forwarding
   #
@@ -282,29 +380,37 @@ Vagrant.configure("2") do |config|
 
   # Default Ubuntu Box
   #
-  # This box is provided by Ubuntu vagrantcloud.com and is a nicely sized (332MB)
-  # box containing the Ubuntu 14.04 Trusty 64 bit release. Once this box is downloaded
+  # This box is provided by Ubuntu vagrantcloud.com and is a nicely sized
+  # box containing the Ubuntu 18.04 Bionic 64 bit release. Once this box is downloaded
   # to your host computer, it is cached for future use under the specified box name.
-  config.vm.box = "ubuntu/trusty64"
+  #config.vm.box = "ubuntu/bionic64"
+  config.vm.box = "varying-vagrant-vagrants/ubuntu-18.04"
+
+  # If we're at a contributor day, switch the base box to the prebuilt one
+  if defined? vvv_config['vm_config']['wordcamp_contributor_day_box'] then
+    if vvv_config['vm_config']['wordcamp_contributor_day_box'] == true then
+	    config.vm.box  = "vvv/contribute"
+    end
+  end
 
   # The Parallels Provider uses a different naming scheme.
   config.vm.provider :parallels do |v, override|
-    override.vm.box = "parallels/ubuntu-14.04"
+    override.vm.box = "parallels/ubuntu-18.04"
   end
 
   # The VMware Fusion Provider uses a different naming scheme.
   config.vm.provider :vmware_fusion do |v, override|
-    override.vm.box = "puphpet/ubuntu1404-x64"
+    override.vm.box = "puphpet/ubuntu1804-x64"
   end
 
   # VMWare Workstation can use the same package as Fusion
   config.vm.provider :vmware_workstation do |v, override|
-    override.vm.box = "puphpet/ubuntu1404-x64"
+    override.vm.box = "puphpet/ubuntu1804-x64"
   end
 
   # Hyper-V uses a different base box.
   config.vm.provider :hyperv do |v, override|
-    override.vm.box = "bento/ubuntu-14.04"
+    override.vm.box = "bento/ubuntu-18.04"
   end
 
   config.vm.hostname = "vvv"
@@ -362,32 +468,43 @@ Vagrant.configure("2") do |config|
   # virtual machine is destroyed with `vagrant destroy`, your files will remain in your local
   # environment.
 
+  # Disable the default synced folder to avoid overlapping mounts
+  config.vm.synced_folder '.', '/vagrant', disabled: true
+  config.vm.provision "file", source: "#{vagrant_dir}/version", destination: "/home/vagrant/version"
+  config.vm.provision "file", source: "#{vagrant_dir}/vvv-custom.yml", destination: "/home/vagrant/vvv-custom.yml"
+  $script = <<-SCRIPT
+# cleanup
+rm -rf /vagrant/* 
+mkdir -p /vagrant
+# copy over version and config files
+cp -f /home/vagrant/version /vagrant
+cp -f /home/vagrant/vvv-custom.yml /vagrant
+# symlink the certificates folder for older site templates compat
+ln -s /srv/certificates /vagrant/certificates
+SCRIPT
+  config.vm.provision "shell",
+    inline: $script
+
   # /srv/database/
   #
   # If a database directory exists in the same directory as your Vagrantfile,
   # a mapped directory inside the VM will be created that contains these files.
   # This directory is used to maintain default database scripts as well as backed
   # up MariaDB/MySQL dumps (SQL files) that are to be imported automatically on vagrant up
-  config.vm.synced_folder "database/", "/srv/database"
+  config.vm.synced_folder "database/sql/", "/srv/database"
 
-  # If the mysql_upgrade_info file from a previous persistent database mapping is detected,
-  # we'll continue to map that directory as /var/lib/mysql inside the virtual machine. Once
-  # this file is changed or removed, this mapping will no longer occur. A db_backup command
-  # is now available inside the virtual machine to backup all databases for future use. This
-  # command is automatically issued on halt, suspend, and destroy
-  if File.exists?(File.join(vagrant_dir,'database/data/mysql_upgrade_info')) then
-    config.vm.synced_folder "database/data/", "/var/lib/mysql", :mount_options => [ "dmode=777", "fmode=777" ]
+  # Map the MySQL Data folders on to mounted folders so it isn't stored inside the VM
+  config.vm.synced_folder "database/data/", "/var/lib/mysql", create: true, owner: 112, group: 115, mount_options: [ "dmode=775", "fmode=664" ]
 
-    # The Parallels Provider does not understand "dmode"/"fmode" in the "mount_options" as
-    # those are specific to Virtualbox. The folder is therefore overridden with one that
-    # uses corresponding Parallels mount options.
-    config.vm.provider :parallels do |v, override|
-      override.vm.synced_folder "database/data/", "/var/lib/mysql", :mount_options => []
-    end
-    # Neither does the HyperV provider
-    config.vm.provider :hyperv do |v, override|
-      override.vm.synced_folder "database/data/", "/var/lib/mysql", :mount_options => []
-    end
+  # The Parallels Provider does not understand "dmode"/"fmode" in the "mount_options" as
+  # those are specific to Virtualbox. The folder is therefore overridden with one that
+  # uses corresponding Parallels mount options.
+  config.vm.provider :parallels do |v, override|
+    override.vm.synced_folder "database/data/", "/var/lib/mysql", create: true, owner: "mysql", group: "mysql", :mount_options => []
+  end
+  # Neither does the HyperV provider
+  config.vm.provider :hyperv do |v, override|
+    override.vm.synced_folder "database/data/", "/var/lib/mysql", create: true, owner: "mysql", group: "mysql", :mount_options => []
   end
 
   # /srv/config/
@@ -398,22 +515,32 @@ Vagrant.configure("2") do |config|
   # nginx as well as any pre-existing database files.
   config.vm.synced_folder "config/", "/srv/config"
 
+  # /srv/config/
+  # 
+  # Map the provision folder so that utilities and provisioners can access helper scripts
+  config.vm.synced_folder "provision/", "/srv/provision"
+
+  # /srv/certificates
+  # 
+  # This is a location for the TLS certificates to be accessible inside the VM
+  config.vm.synced_folder "certificates/", "/srv/certificates", create: true
+
   # /var/log/
   #
   # If a log directory exists in the same directory as your Vagrantfile, a mapped
   # directory inside the VM will be created for some generated log files.
-  config.vm.synced_folder "log/", "/var/log", :owner => "vagrant", :mount_options => [ "dmode=777", "fmode=777" ]
+  config.vm.synced_folder "log/", "/var/log", owner: "root", group: "syslog", mount_options: [ "dmode=777", "fmode=666" ]
 
   # /srv/www/
   #
   # If a www directory exists in the same directory as your Vagrantfile, a mapped directory
   # inside the VM will be created that acts as the default location for nginx sites. Put all
   # of your project files here that you want to access through the web server
-  config.vm.synced_folder "www/", "/srv/www", :owner => "www-data", :mount_options => [ "dmode=775", "fmode=774" ]
+  config.vm.synced_folder "www/", "/srv/www", owner: "vagrant", group: "www-data", mount_options: [ "dmode=775", "fmode=774" ]
 
   vvv_config['sites'].each do |site, args|
     if args['local_dir'] != File.join(vagrant_dir, 'www', site) then
-      config.vm.synced_folder args['local_dir'], args['vm_dir'], :owner => "www-data", :mount_options => [ "dmode=775", "fmode=774" ]
+      config.vm.synced_folder args['local_dir'], args['vm_dir'], owner: "vagrant", group: "www-data", :mount_options => [ "dmode=775", "fmode=774" ]
     end
   end
 
@@ -525,6 +652,7 @@ Vagrant.configure("2") do |config|
     utilities.each do |utility|
         if utility == 'tideways' then
           vvv_config['hosts'] += ['tideways.vvv.test']
+          vvv_config['hosts'] += ['xhgui.vvv.test']
         end
         config.vm.provision "utility-#{name}-#{utility}",
           type: "shell",
@@ -587,32 +715,41 @@ Vagrant.configure("2") do |config|
   # scripting. See the individual files in config/homebin/ for details.
   config.trigger.after :up do |trigger|
     trigger.name = "VVV Post-Up"
-    trigger.run_remote = { inline: "/vagrant/config/homebin/vagrant_up" }
+    trigger.run_remote = { inline: "/srv/config/homebin/vagrant_up" }
+    trigger.on_error = :continue
+  end
+  config.trigger.before :provision do |trigger|
+    trigger.info = "༼ つ ◕_◕ ༽つ Provisioning can take a few minutes, go make a cup of tea and sit back. If you only wanted to turn VVV on, use vagrant up"
+    trigger.on_error = :continue
+  end
+  config.trigger.after :provision do |trigger|
+    trigger.name = "VVV Post-Provision"
+    trigger.run_remote = { inline: "/srv/config/homebin/vagrant_provision" }
     trigger.on_error = :continue
   end
   config.trigger.before :reload do |trigger|
     trigger.name = "VVV Pre-Reload"
-    trigger.run_remote = { inline: "/vagrant/config/homebin/vagrant_halt" }
+    trigger.run_remote = { inline: "/srv/config/homebin/vagrant_halt" }
     trigger.on_error = :continue
   end
   config.trigger.after :reload do |trigger|
     trigger.name = "VVV Post-Reload"
-    trigger.run_remote = { inline: "/vagrant/config/homebin/vagrant_up" }
+    trigger.run_remote = { inline: "/srv/config/homebin/vagrant_up" }
     trigger.on_error = :continue
   end
   config.trigger.before :halt do |trigger|
     trigger.name = "VVV Pre-Halt"
-    trigger.run_remote = { inline: "/vagrant/config/homebin/vagrant_halt" }
+    trigger.run_remote = { inline: "/srv/config/homebin/vagrant_halt" }
     trigger.on_error = :continue
   end
   config.trigger.before :suspend do |trigger|
     trigger.name = "VVV Pre-Suspend"
-    trigger.run_remote = { inline: "/vagrant/config/homebin/vagrant_suspend" }
+    trigger.run_remote = { inline: "/srv/config/homebin/vagrant_suspend" }
     trigger.on_error = :continue
   end
   config.trigger.before :destroy do |trigger|
     trigger.name = "VVV Pre-Destroy"
-    trigger.run_remote = { inline: "/vagrant/config/homebin/vagrant_destroy" }
+    trigger.run_remote = { inline: "/srv/config/homebin/vagrant_destroy" }
     trigger.on_error = :continue
   end
 end

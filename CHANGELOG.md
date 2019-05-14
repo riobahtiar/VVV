@@ -4,6 +4,49 @@ title: Changelog
 permalink: /docs/en-US/changelog/
 ---
 
+## 3.0.0 ( May 2019 )
+
+This version moves to an Ubuntu 18.04 box. It also moves the database data directory to a mounted folder. This means you can destroy and rebuild the VM without loss, but it also means **a `vagrant destroy` is necessary to update**. **Be sure to back up database tables you need beforehand**.
+
+In the near future, we expect to use a box with PHP/etc preinstalled, this will be VVV 4.0.
+
+### Enhancements
+
+ - The box was changed to use Ubuntu 18.04 LTS
+ - If cloning a git repo to create a new site fails, VVV will halt provisioning and warn the user
+ - Added tbe `git-svn` package, `git-svn` is used for bi-directional operation between subversion and git
+ - MongoDB was updated to v4.0
+ - New `/srv/provision` and `/srv/certificates` shared folders
+
+### Bug Fixes
+
+ - Added a VVV package mirror PPA
+ - Updated apt-get keys for several sources
+ - Prevented provisioning from occurring inside Ubuntu 14 VMs
+ - Fixed issues with Nginx restarting too fast and too often
+ - Fixed the permissions on the `db_restore` script
+
+### Removals
+
+ - The deprecated domains `vvv.dev`, `vvv.local`, and `vvv.localhost`, were removed, the dashboard lives at `vvv.test`.
+ - Removed the `/vagrant` default shared folder
+
+## 2.6.0 ( 2nd April 2019 )
+
+### Enhancements
+
+ * Auto download plugin for vagrant, supported vagrant 2.2.0+
+ * Autoset the locale inside the virtual machine to avoid errors in the console
+ * Added a `vagrant_provision` and `vagrant_provision_custom` script to the homebin folder that run post-provision
+ * Improved the messaging to tell the user at the end of a `vagrant up` or `vagrant provision` that it was succesful
+ * Added friendly splashes at the end of vagrant up and provision to make it obvious to end users when they've finished
+ * The VVV install path is now in the splash screen, making it easier to debug GH issues
+ * Added a `wordcamp_contributor_day_box` flag to the `vm_config` section of `vvv-config.yml` so that contributor day setup scripts are simpler
+
+### Bug Fixes
+
+ * Improved detection of VirtualBox path to avoid `???` version numbers in the VVV splash
+
 ## 2.5.1 ( 14th January 2019 )
 
 2.5 Brings a major bug fix, and some performance improvements to provisioning
@@ -35,7 +78,7 @@ permalink: /docs/en-US/changelog/
 
 ## 2.4.0 ( 2018 October 2th )
 
-### Enhancements
+### Enhancements
 
  * Updated Node v6 to Node v10
  * The default site config has been improved to clear up confusion over the difference between the site template and the develop site template
